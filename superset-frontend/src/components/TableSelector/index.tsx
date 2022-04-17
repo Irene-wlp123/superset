@@ -354,6 +354,7 @@ const TableSelector: FunctionComponent<TableSelectorProps> = ({
 
   return (
     <TableSelectorWrapper>
+      <a>表格是什么</a>
       {renderDatabaseSelector()}
       {sqlLabMode && !formMode && <div className="divider" />}
       {renderTableSelect()}

@@ -328,6 +328,7 @@ export default React.memo(
                       {...cell.getCellProps()}
                       {...columnCellProps}
                     >
+                      测试table埋点1
                       <span
                         className={cx({ 'loading-bar': loading })}
                         role={loading ? 'progressbar' : undefined}

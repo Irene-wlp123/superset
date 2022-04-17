@@ -42,8 +42,8 @@ import { FeatureFlag, isFeatureEnabled } from 'src/featureFlags';
 import { AntdSwitch } from 'src/components';
 
 import ActivityTable from './ActivityTable';
-import ChartTable from './ChartTable';
-import SavedQueries from './SavedQueries';
+// import ChartTable from './ChartTable';
+// import SavedQueries from './SavedQueries';
 import DashboardTable from './DashboardTable';
 
 interface WelcomeProps {
@@ -279,7 +279,7 @@ function Welcome({ user, addDangerToast }: WelcomeProps) {
   return (
     <WelcomeContainer>
       <WelcomeNav>
-        <h1 className="welcome-header">Home</h1>
+        <h1 className="welcome-header">首页</h1>
         {isFeatureEnabled(FeatureFlag.THUMBNAILS) ? (
           <div className="switch">
             <AntdSwitch checked={checked} onChange={handleToggle} />
@@ -314,30 +314,6 @@ function Welcome({ user, addDangerToast }: WelcomeProps) {
               mine={dashboardData}
               showThumbnails={checked}
               examples={activityData?.Examples}
-            />
-          )}
-        </Collapse.Panel>
-        <Collapse.Panel header={t('Charts')} key="3">
-          {!chartData || isRecentActivityLoading ? (
-            <LoadingCards cover={checked} />
-          ) : (
-            <ChartTable
-              showThumbnails={checked}
-              user={user}
-              mine={chartData}
-              examples={activityData?.Examples}
-            />
-          )}
-        </Collapse.Panel>
-        <Collapse.Panel header={t('Saved queries')} key="4">
-          {!queryData ? (
-            <LoadingCards cover={checked} />
-          ) : (
-            <SavedQueries
-              showThumbnails={checked}
-              user={user}
-              mine={queryData}
-              featureFlag={isFeatureEnabled(FeatureFlag.THUMBNAILS)}
             />
           )}
         </Collapse.Panel>

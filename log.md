@@ -10,13 +10,17 @@
 - pip install requests
 - Pip install pillow
 - pip install Werkzeug==2.0.0
-- pip install  Flask==1.1.4 Jinja2==2.8 (未验证成功，不要执行)
+- pip install jinja2==3.0.3
 - superset db upgrade 初始化数据库
 - superset fab create-admin
 - superset load_examples
 - superset init
-- 启动 ss server：superset run -p 3000 --with-threads --reload --debugger
-- 前端初始化：cd superset-frontend
-- npm install or sudo yarn
-- 修改 webpack 配置:![img.png](img.png)
-- 启动前端： npm run dev or sudo yarn start
+- superset run -p 3000 --with-threads --reload --debugger
+- cd superset-frontend
+-  npm cache clear --force  
+- npm install 
+- 启动前端： npm run dev     run之后，刷新页面，热更新
+
+## 容器部署SS
+
+- npm run build 打包前端

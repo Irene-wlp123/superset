@@ -69,6 +69,7 @@ export default function LanguagePicker(props: LanguagePickerProps) {
       icon={<Icons.TriangleDown />}
       {...rest}
     >
+
       {Object.keys(languages).map(langKey => (
         <Menu.Item
           key={langKey}

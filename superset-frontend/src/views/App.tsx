@@ -61,6 +61,7 @@ const LocationPathnameLogger = () => {
 const App = () => (
   <Router>
     <LocationPathnameLogger />
+    <a>ahahahaaaaa11111</a>
     <RootContextProviders>
       <GlobalStyles />
       <Menu data={menu} isFrontendRoute={isFrontendRoute} />

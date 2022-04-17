@@ -66,6 +66,7 @@ export const rootReducer = combineReducers({
   ...dashboardReducers,
 });
 
+// @ts-ignore
 export const store = createStore(
   rootReducer,
   {},
