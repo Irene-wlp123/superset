@@ -8,7 +8,7 @@
 - pip install -e .
 - pip install apache-superset
 - pip install requests
-- Pip install pillow
+- pip install pillow
 - pip install Werkzeug==2.0.0
 - pip install jinja2==3.0.3
 - superset db upgrade 初始化数据库
@@ -17,10 +17,11 @@
 - superset init
 - superset run -p 3000 --with-threads --reload --debugger
 - cd superset-frontend
--  npm cache clear --force  
-- npm install 
-- 启动前端： npm run dev     run之后，刷新页面，热更新
+- npm cache clear --force
+- npm install
+- 启动前端： npm run dev run之后，刷新页面，热更新
 
 ## 容器部署SS
 
 - npm run build 打包前端
+- docker build -t zosoul-builder -f Dockerfile-zosoul .

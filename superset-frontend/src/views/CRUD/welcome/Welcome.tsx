@@ -279,7 +279,7 @@ function Welcome({ user, addDangerToast }: WelcomeProps) {
   return (
     <WelcomeContainer>
       <WelcomeNav>
-        <h1 className="welcome-header">首页</h1>
+        <h1 className="welcome-header">首页测试</h1>
         {isFeatureEnabled(FeatureFlag.THUMBNAILS) ? (
           <div className="switch">
             <AntdSwitch checked={checked} onChange={handleToggle} />
