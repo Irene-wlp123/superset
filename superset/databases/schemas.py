@@ -397,6 +397,7 @@ class DatabasePostSchema(Schema, DatabaseParametersSchemaMixin):
     )
     is_managed_externally = fields.Boolean(allow_none=True, default=False)
     external_url = fields.String(allow_none=True)
+    uuid = fields.String(required=False)
 
 
 class DatabasePutSchema(Schema, DatabaseParametersSchemaMixin):
@@ -527,12 +528,31 @@ class TableMetadataResponseSchema(Schema):
     selectStar = fields.String(description="SQL select star")
 
 
+class TableExtraMetadataResponseSchema(Schema):
+    metadata = fields.Dict()
+    partitions = fields.Dict()
+    clustering = fields.Dict()
+
+
 class SelectStarResponseSchema(Schema):
     result = fields.String(description="SQL select star")
 
 
 class SchemasResponseSchema(Schema):
     result = fields.List(fields.String(description="A database schema name"))
+
+
+class ValidateSQLRequest(Schema):
+    sql = fields.String(required=True, description="SQL statement to validate")
+    schema = fields.String(required=False, allow_none=True)
+    template_params = fields.Dict(required=False, allow_none=True)
+
+
+class ValidateSQLResponse(Schema):
+    line_number = fields.Integer()
+    start_column = fields.Integer()
+    end_column = fields.Integer()
+    message = fields.String()
 
 
 class DatabaseRelatedChart(Schema):
@@ -605,6 +625,7 @@ class ImportV1DatabaseExtraSchema(Schema):
     schemas_allowed_for_csv_upload = fields.List(fields.String())
     cost_estimate_enabled = fields.Boolean()
     allows_virtual_table_explore = fields.Boolean(required=False)
+    cancel_query_on_windows_unload = fields.Boolean(required=False)
 
 
 class ImportV1DatabaseSchema(Schema):

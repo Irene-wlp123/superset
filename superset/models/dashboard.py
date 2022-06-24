@@ -46,11 +46,11 @@ from sqlalchemy.orm.session import object_session
 from sqlalchemy.sql import join, select
 from sqlalchemy.sql.elements import BinaryExpression
 
-from superset import app, ConnectorRegistry, db, is_feature_enabled, security_manager
+from superset import app, db, is_feature_enabled, security_manager
 from superset.common.request_contexed_based import is_user_admin
 from superset.connectors.base.models import BaseDatasource
-from superset.connectors.druid.models import DruidColumn, DruidMetric
-from superset.connectors.sqla.models import SqlMetric, TableColumn
+from superset.connectors.sqla.models import SqlaTable, SqlMetric, TableColumn
+from superset.datasource.dao import DatasourceDAO
 from superset.extensions import cache_manager
 from superset.models.filter_set import FilterSet
 from superset.models.helpers import AuditMixinNullable, ImportExportMixin
@@ -146,7 +146,9 @@ class Dashboard(Model, AuditMixinNullable, ImportExportMixin):
     certification_details = Column(Text)
     json_metadata = Column(Text)
     slug = Column(String(255), unique=True)
-    slices = relationship(Slice, secondary=dashboard_slices, backref="dashboards")
+    slices: List[Slice] = relationship(
+        Slice, secondary=dashboard_slices, backref="dashboards"
+    )
     owners = relationship(security_manager.user_model, secondary=dashboard_user)
     published = Column(Boolean, default=False)
     is_managed_externally = Column(Boolean, nullable=False, default=False)
@@ -219,7 +221,7 @@ class Dashboard(Model, AuditMixinNullable, ImportExportMixin):
         }
 
     @property
-    def charts(self) -> List[BaseDatasource]:
+    def charts(self) -> List[str]:
         return [slc.chart for slc in self.slices]
 
     @property
@@ -406,16 +408,18 @@ class Dashboard(Model, AuditMixinNullable, ImportExportMixin):
                     id_ = target.get("datasetId")
                     if id_ is None:
                         continue
-                    datasource = ConnectorRegistry.get_datasource_by_id(session, id_)
+                    datasource = DatasourceDAO.get_datasource(
+                        session, utils.DatasourceType.TABLE, id_
+                    )
                     datasource_ids.add((datasource.id, datasource.type))
 
             copied_dashboard.alter_params(remote_id=dashboard_id)
             copied_dashboards.append(copied_dashboard)
 
         eager_datasources = []
-        for datasource_id, datasource_type in datasource_ids:
-            eager_datasource = ConnectorRegistry.get_eager_datasource(
-                db.session, datasource_type, datasource_id
+        for datasource_id, _ in datasource_ids:
+            eager_datasource = SqlaTable.get_eager_sqlatable_datasource(
+                db.session, datasource_id
             )
             copied_datasource = eager_datasource.copy()
             copied_datasource.alter_params(
@@ -485,8 +489,6 @@ if is_feature_enabled("DASHBOARD_CACHE"):
             Dashboard.clear_cache_for_datasource(datasource_id=obj.id)
         elif isinstance(obj, (SqlMetric, TableColumn)):
             Dashboard.clear_cache_for_datasource(datasource_id=obj.table_id)
-        elif isinstance(obj, (DruidMetric, DruidColumn)):
-            Dashboard.clear_cache_for_datasource(datasource_id=obj.datasource_id)
 
     sqla.event.listen(Dashboard, "after_update", clear_dashboard_cache)
     sqla.event.listen(
@@ -501,5 +503,3 @@ if is_feature_enabled("DASHBOARD_CACHE"):
     # trigger update events for BaseDatasource.
     sqla.event.listen(SqlMetric, "after_update", clear_dashboard_cache)
     sqla.event.listen(TableColumn, "after_update", clear_dashboard_cache)
-    sqla.event.listen(DruidMetric, "after_update", clear_dashboard_cache)
-    sqla.event.listen(DruidColumn, "after_update", clear_dashboard_cache)

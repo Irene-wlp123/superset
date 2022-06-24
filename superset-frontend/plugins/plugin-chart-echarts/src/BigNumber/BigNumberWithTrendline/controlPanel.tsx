@@ -164,7 +164,7 @@ const config: ControlPanelConfig = {
       expanded: false,
       controlSetRows: [
         // eslint-disable-next-line react/jsx-key
-        [<h1 className="section-header">{t('Rolling Window')}</h1>],
+        [<div className="section-header">{t('Rolling Window')}</div>],
         [
           {
             name: 'rolling_type',
@@ -217,8 +217,7 @@ const config: ControlPanelConfig = {
             },
           },
         ],
-        // eslint-disable-next-line react/jsx-key
-        [<h1 className="section-header">{t('Resample')}</h1>],
+        [<div className="section-header">{t('Resample')}</div>],
         [
           {
             name: 'resample_rule',
@@ -271,6 +270,10 @@ const config: ControlPanelConfig = {
       label: t('Number format'),
     },
   },
+  denormalizeFormData: formData => ({
+    ...formData,
+    metric: formData.standardizedFormData.standardizedState.metrics[0],
+  }),
 };
 
 export default config;

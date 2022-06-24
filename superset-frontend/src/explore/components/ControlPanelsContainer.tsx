@@ -40,7 +40,7 @@ import {
   ControlPanelSectionConfig,
   ControlState,
   CustomControlItem,
-  DatasourceMeta,
+  Dataset,
   ExpandedControlItem,
   InfoTooltipWithTrigger,
   sections,
@@ -58,9 +58,10 @@ import { ExplorePageState } from 'src/explore/reducers/getInitialState';
 import { ChartState } from 'src/explore/types';
 import { Tooltip } from 'src/components/Tooltip';
 
+import { rgba } from 'emotion-rgba';
 import ControlRow from './ControlRow';
 import Control from './Control';
-import { ControlPanelAlert } from './ControlPanelAlert';
+import { ExploreAlert } from './ExploreAlert';
 import { RunQueryButton } from './RunQueryButton';
 
 export type ControlPanelsContainerProps = {
@@ -92,8 +93,9 @@ const actionButtonsContainerStyles = (theme: SupersetTheme) => css`
   flex-direction: column;
   align-items: center;
   padding: ${theme.gridUnit * 4}px;
+  z-index: 999;
   background: linear-gradient(
-    transparent,
+    ${rgba(theme.colors.grayscale.light5, 0)},
     ${theme.colors.grayscale.light5} ${theme.opacity.mediumLight}
   );
 
@@ -149,6 +151,21 @@ const ControlPanelsTabs = styled(Tabs)`
     .ant-tabs-content-holder {
       padding-top: ${theme.gridUnit * 4}px;
     }
+
+    .ant-collapse-ghost > .ant-collapse-item {
+      &:not(:last-child) {
+        border-bottom: 1px solid ${theme.colors.grayscale.light3};
+      }
+
+      & > .ant-collapse-header {
+        font-size: ${theme.typography.sizes.s}px;
+      }
+
+      & > .ant-collapse-content > .ant-collapse-content-box {
+        padding-bottom: 0;
+        font-size: ${theme.typography.sizes.s}px;
+      }
+    }
   `}
 `;
 
@@ -157,13 +174,13 @@ const isTimeSection = (section: ControlPanelSectionConfig): boolean =>
   (sections.legacyRegularTime.label === section.label ||
     sections.legacyTimeseriesTime.label === section.label);
 
-const hasTimeColumn = (datasource: DatasourceMeta): boolean =>
+const hasTimeColumn = (datasource: Dataset): boolean =>
   datasource?.columns?.some(c => c.is_dttm) ||
   datasource.type === DatasourceType.Druid;
 
 const sectionsToExpand = (
   sections: ControlPanelSectionConfig[],
-  datasource: DatasourceMeta,
+  datasource: Dataset,
 ): string[] =>
   // avoid expanding time section if datasource doesn't include time column
   sections.reduce(
@@ -176,7 +193,7 @@ const sectionsToExpand = (
 
 function getState(
   vizType: string,
-  datasource: DatasourceMeta,
+  datasource: Dataset,
   datasourceType: DatasourceType,
 ) {
   const querySections: ControlPanelSectionConfig[] = [];
@@ -387,6 +404,7 @@ export const ControlPanelsContainer = (props: ControlPanelsContainerProps) => {
 
           &:last-child {
             padding-bottom: ${theme.gridUnit * 16}px;
+            border-bottom: 0;
           }
 
           .panel-body {
@@ -443,7 +461,7 @@ export const ControlPanelsContainer = (props: ControlPanelsContainerProps) => {
   const DatasourceAlert = useCallback(
     () =>
       hasControlsTransferred ? (
-        <ControlPanelAlert
+        <ExploreAlert
           title={t('Keep control settings?')}
           bodyText={t(
             "You've changed datasets. Any controls with data (columns, metrics) that match this new dataset have been retained.",
@@ -455,7 +473,7 @@ export const ControlPanelsContainer = (props: ControlPanelsContainerProps) => {
           type="info"
         />
       ) : (
-        <ControlPanelAlert
+        <ExploreAlert
           title={t('No form settings were maintained')}
           bodyText={t(
             'We were unable to carry over any controls when switching to this new dataset.',
@@ -514,11 +532,9 @@ export const ControlPanelsContainer = (props: ControlPanelsContainerProps) => {
       >
         <Tabs.TabPane key="query" tab={dataTabTitle}>
           <Collapse
-            bordered
             defaultActiveKey={expandedQuerySections}
             expandIconPosition="right"
             ghost
-            key={`query-sections-${props.form_data.datasource}-${props.form_data.viz_type}`}
           >
             {showDatasourceAlert && <DatasourceAlert />}
             {querySections.map(renderControlPanelSection)}
@@ -527,11 +543,9 @@ export const ControlPanelsContainer = (props: ControlPanelsContainerProps) => {
         {showCustomizeTab && (
           <Tabs.TabPane key="display" tab={t('Customize')}>
             <Collapse
-              bordered
               defaultActiveKey={expandedCustomizeSections}
               expandIconPosition="right"
               ghost
-              key={`customize-sections-${props.form_data.datasource}-${props.form_data.viz_type}`}
             >
               {customizeSections.map(renderControlPanelSection)}
             </Collapse>

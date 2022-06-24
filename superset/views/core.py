@@ -61,7 +61,6 @@ from superset.charts.dao import ChartDAO
 from superset.common.chart_data import ChartDataResultFormat, ChartDataResultType
 from superset.common.db_query_status import QueryStatus
 from superset.connectors.base.models import BaseDatasource
-from superset.connectors.connector_registry import ConnectorRegistry
 from superset.connectors.sqla.models import (
     AnnotationDatasource,
     SqlaTable,
@@ -77,6 +76,7 @@ from superset.databases.dao import DatabaseDAO
 from superset.databases.filters import DatabaseFilter
 from superset.databases.utils import make_url_safe
 from superset.datasets.commands.exceptions import DatasetNotFoundError
+from superset.datasource.dao import DatasourceDAO
 from superset.errors import ErrorLevel, SupersetError, SupersetErrorType
 from superset.exceptions import (
     CacheLoadError,
@@ -113,7 +113,7 @@ from superset.sqllab.exceptions import (
     QueryIsForbiddenToAccessException,
     SqlLabException,
 )
-from superset.sqllab.execution_context_convertor import ExecutionContextConvertorImpl
+from superset.sqllab.execution_context_convertor import ExecutionContextConvertor
 from superset.sqllab.limiting_factor import LimitingFactor
 from superset.sqllab.query_render import SqlQueryRenderImpl
 from superset.sqllab.sql_json_executer import (
@@ -129,7 +129,11 @@ from superset.tasks.async_queries import load_explore_json_into_cache
 from superset.utils import core as utils, csv
 from superset.utils.async_query_manager import AsyncQueryTokenException
 from superset.utils.cache import etag_cache
-from superset.utils.core import apply_max_row_limit, ReservedUrlParameters
+from superset.utils.core import (
+    apply_max_row_limit,
+    DatasourceType,
+    ReservedUrlParameters,
+)
 from superset.utils.dates import now_as_float
 from superset.utils.decorators import check_dashboard_access
 from superset.views.base import (
@@ -250,7 +254,7 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
                     )
                     db_ds_names.add(fullname)
 
-        existing_datasources = ConnectorRegistry.get_all_datasources(db.session)
+        existing_datasources = SqlaTable.get_all_datasources(db.session)
         datasources = [d for d in existing_datasources if d.full_name in db_ds_names]
         role = security_manager.find_role(role_name)
         # remove all permissions
@@ -282,7 +286,7 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
         datasource_id = request.args.get("datasource_id")
         datasource_type = request.args.get("datasource_type")
         if datasource_id and datasource_type:
-            ds_class = ConnectorRegistry.sources.get(datasource_type)
+            ds_class = DatasourceDAO.sources.get(datasource_type)
             datasource = (
                 db.session.query(ds_class).filter_by(id=int(datasource_id)).one()
             )
@@ -319,10 +323,8 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
     def approve(self) -> FlaskResponse:  # pylint: disable=too-many-locals,no-self-use
         def clean_fulfilled_requests(session: Session) -> None:
             for dar in session.query(DAR).all():
-                datasource = ConnectorRegistry.get_datasource(
-                    dar.datasource_type,
-                    dar.datasource_id,
-                    session,
+                datasource = DatasourceDAO.get_datasource(
+                    session, DatasourceType(dar.datasource_type), dar.datasource_id
                 )
                 if not datasource or security_manager.can_access_datasource(datasource):
                     # Dataset does not exist anymore
@@ -336,8 +338,8 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
         role_to_extend = request.args.get("role_to_extend")
 
         session = db.session
-        datasource = ConnectorRegistry.get_datasource(
-            datasource_type, datasource_id, session
+        datasource = DatasourceDAO.get_datasource(
+            session, DatasourceType(datasource_type), int(datasource_id)
         )
 
         if not datasource:
@@ -639,7 +641,6 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
             datasource_id, datasource_type = get_datasource_info(
                 datasource_id, datasource_type, form_data
             )
-
             force = request.args.get("force") == "true"
 
             # TODO: support CSV, SQL query and other non-JSON types
@@ -809,8 +810,10 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
         datasource: Optional[BaseDatasource] = None
         if datasource_id is not None:
             try:
-                datasource = ConnectorRegistry.get_datasource(
-                    cast(str, datasource_type), datasource_id, db.session
+                datasource = DatasourceDAO.get_datasource(
+                    db.session,
+                    DatasourceType(cast(str, datasource_type)),
+                    datasource_id,
                 )
             except DatasetNotFoundError:
                 pass
@@ -833,6 +836,19 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
         viz_type = form_data.get("viz_type")
         if not viz_type and datasource and datasource.default_endpoint:
             return redirect(datasource.default_endpoint)
+
+        selectedColumns = []
+
+        if "selectedColumns" in form_data:
+            selectedColumns = form_data.pop("selectedColumns")
+
+        if "viz_type" not in form_data:
+            form_data["viz_type"] = app.config["DEFAULT_VIZ_TYPE"]
+            if app.config["DEFAULT_VIZ_TYPE"] == "table":
+                all_columns = []
+                for x in selectedColumns:
+                    all_columns.append(x["name"])
+                form_data["all_columns"] = all_columns
 
         # slc perms
         slice_add_perm = security_manager.can_access("can_write", "Chart")
@@ -891,6 +907,8 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
 
         if datasource:
             datasource_data["owners"] = datasource.owners_data
+            if isinstance(datasource, Query):
+                datasource_data["columns"] = datasource.columns
 
         bootstrap_data = {
             "can_add": slice_add_perm,
@@ -946,10 +964,8 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
         :raises SupersetSecurityException: If the user cannot access the resource
         """
         # TODO: Cache endpoint by user, datasource and column
-        datasource = ConnectorRegistry.get_datasource(
-            datasource_type,
-            datasource_id,
-            db.session,
+        datasource = DatasourceDAO.get_datasource(
+            db.session, DatasourceType(datasource_type), datasource_id
         )
         if not datasource:
             return json_error_response(DATASOURCE_MISSING_ERR)
@@ -1115,31 +1131,37 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
         substr_parsed = utils.parse_js_uri_path_item(substr, eval_undefined=True)
 
         if schema_parsed:
-            tables = (
-                database.get_all_table_names_in_schema(
+            tables = [
+                utils.DatasourceName(*datasource_name)
+                for datasource_name in database.get_all_table_names_in_schema(
                     schema=schema_parsed,
                     force=force_refresh_parsed,
                     cache=database.table_cache_enabled,
                     cache_timeout=database.table_cache_timeout,
                 )
-                or []
-            )
-            views = (
-                database.get_all_view_names_in_schema(
+            ] or []
+            views = [
+                utils.DatasourceName(*datasource_name)
+                for datasource_name in database.get_all_view_names_in_schema(
                     schema=schema_parsed,
                     force=force_refresh_parsed,
                     cache=database.table_cache_enabled,
                     cache_timeout=database.table_cache_timeout,
                 )
-                or []
-            )
+            ] or []
         else:
-            tables = database.get_all_table_names_in_database(
-                cache=True, force=False, cache_timeout=24 * 60 * 60
-            )
-            views = database.get_all_view_names_in_database(
-                cache=True, force=False, cache_timeout=24 * 60 * 60
-            )
+            tables = [
+                utils.DatasourceName(*datasource_name)
+                for datasource_name in database.get_all_table_names_in_database(
+                    cache=True, force=False, cache_timeout=24 * 60 * 60
+                )
+            ]
+            views = [
+                utils.DatasourceName(*datasource_name)
+                for datasource_name in database.get_all_view_names_in_database(
+                    cache=True, force=False, cache_timeout=24 * 60 * 60
+                )
+            ]
         tables = security_manager.get_datasources_accessible_by_user(
             database, tables, schema_parsed
         )
@@ -1325,8 +1347,13 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
     @has_access_api
     @event_logger.log_this
     @expose("/testconn", methods=["POST", "GET"])
-    def testconn(self) -> FlaskResponse:  # pylint: disable=no-self-use
+    def testconn(self) -> FlaskResponse:
         """Tests a sqla connection"""
+        logger.warning(
+            "%s.testconn "
+            "This API endpoint is deprecated and will be removed in version 3.0.0",
+            self.__class__.__name__,
+        )
         db_name = request.json.get("name")
         uri = request.json.get("uri")
         try:
@@ -1356,11 +1383,7 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
             )
             database.set_sqlalchemy_uri(uri)
             database.db_engine_spec.mutate_db_for_connection_test(database)
-
-            username = (
-                g.user.username if g.user and hasattr(g.user, "username") else None
-            )
-            engine = database.get_sqla_engine(user_name=username)
+            engine = database.get_sqla_engine()
 
             with closing(engine.raw_connection()) as conn:
                 if engine.dialect.do_ping(conn):
@@ -1543,6 +1566,11 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
     @expose("/fave_dashboards_by_username/<username>/", methods=["GET"])
     def fave_dashboards_by_username(self, username: str) -> FlaskResponse:
         """This lets us use a user's username to pull favourite dashboards"""
+        logger.warning(
+            "%s.fave_dashboards_by_username "
+            "This API endpoint is deprecated and will be removed in version 3.0.0",
+            self.__class__.__name__,
+        )
         user = security_manager.find_user(username=username)
         return self.fave_dashboards(user.id)
 
@@ -1551,6 +1579,11 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
     @event_logger.log_this
     @expose("/fave_dashboards/<int:user_id>/", methods=["GET"])
     def fave_dashboards(self, user_id: int) -> FlaskResponse:
+        logger.warning(
+            "%s.fave_dashboards "
+            "This API endpoint is deprecated and will be removed in version 3.0.0",
+            self.__class__.__name__,
+        )
         error_obj = self.get_user_activity_access_error(user_id)
         if error_obj:
             return error_obj
@@ -1587,7 +1620,7 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
     @event_logger.log_this
     @expose("/created_dashboards/<int:user_id>/", methods=["GET"])
     def created_dashboards(self, user_id: int) -> FlaskResponse:
-        logging.warning(
+        logger.warning(
             "%s.created_dashboards "
             "This API endpoint is deprecated and will be removed in version 3.0.0",
             self.__class__.__name__,
@@ -1901,8 +1934,8 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
 
         if config["ENABLE_ACCESS_REQUEST"]:
             for datasource in dashboard.datasources:
-                datasource = ConnectorRegistry.get_datasource(
-                    datasource_type=datasource.type,
+                datasource = DatasourceDAO.get_datasource(
+                    datasource_type=DatasourceType(datasource.type),
                     datasource_id=datasource.id,
                     session=db.session(),
                 )
@@ -1926,6 +1959,8 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
             request.args.get(utils.ReservedUrlParameters.EDIT_MODE.value) == "true"
         )
 
+        standalone_mode = ReservedUrlParameters.is_standalone_mode()
+
         add_extra_log_payload(
             dashboard_id=dashboard.id,
             dashboard_version="v2",
@@ -1944,6 +1979,7 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
             bootstrap_data=json.dumps(
                 bootstrap_data, default=utils.pessimistic_json_iso_dttm_ser
             ),
+            standalone_mode=standalone_mode,
         )
 
     @has_access
@@ -1976,61 +2012,6 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
     @expose("/log/", methods=["POST"])
     def log(self) -> FlaskResponse:  # pylint: disable=no-self-use
         return Response(status=200)
-
-    @has_access
-    @expose("/sync_druid/", methods=["POST"])
-    @event_logger.log_this
-    def sync_druid_source(self) -> FlaskResponse:  # pylint: disable=no-self-use
-        """Syncs the druid datasource in main db with the provided config.
-
-        The endpoint takes 3 arguments:
-            user - user name to perform the operation as
-            cluster - name of the druid cluster
-            config - configuration stored in json that contains:
-                name: druid datasource name
-                dimensions: list of the dimensions, they become druid columns
-                    with the type STRING
-                metrics_spec: list of metrics (dictionary). Metric consists of
-                    2 attributes: type and name. Type can be count,
-                    etc. `count` type is stored internally as longSum
-                    other fields will be ignored.
-
-            Example: {
-                'name': 'test_click',
-                'metrics_spec': [{'type': 'count', 'name': 'count'}],
-                'dimensions': ['affiliate_id', 'campaign', 'first_seen']
-            }
-        """
-        payload = request.get_json(force=True)
-        druid_config = payload["config"]
-        user_name = payload["user"]
-        cluster_name = payload["cluster"]
-
-        user = security_manager.find_user(username=user_name)
-        DruidDatasource = ConnectorRegistry.sources[  # pylint: disable=invalid-name
-            "druid"
-        ]
-        DruidCluster = DruidDatasource.cluster_class  # pylint: disable=invalid-name
-        if not user:
-            err_msg = __("Can't find user, please ask your admin to create one.")
-            logger.error(err_msg, exc_info=True)
-            return json_error_response(err_msg)
-        cluster = (
-            db.session.query(DruidCluster)
-            .filter_by(cluster_name=cluster_name)
-            .one_or_none()
-        )
-        if not cluster:
-            err_msg = __("Can't find DruidCluster")
-            logger.error(err_msg, exc_info=True)
-            return json_error_response(err_msg)
-        try:
-            DruidDatasource.sync_to_db_from_config(druid_config, user, cluster)
-        except Exception as ex:  # pylint: disable=broad-except
-            err_msg = utils.error_msg_from_exception(ex)
-            logger.exception(err_msg)
-            return json_error_response(err_msg)
-        return Response(status=201)
 
     @has_access
     @expose("/get_or_create_table/", methods=["POST"])
@@ -2132,9 +2113,15 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
     @has_access
     @expose("/extra_table_metadata/<int:database_id>/<table_name>/<schema>/")
     @event_logger.log_this
-    def extra_table_metadata(  # pylint: disable=no-self-use
+    def extra_table_metadata(
         self, database_id: int, table_name: str, schema: str
     ) -> FlaskResponse:
+        logger.warning(
+            "%s.extra_table_metadata "
+            "This API endpoint is deprecated and will be removed in version 3.0.0",
+            self.__class__.__name__,
+        )
+
         parsed_schema = utils.parse_js_uri_path_item(schema, eval_undefined=True)
         table_name = utils.parse_js_uri_path_item(table_name)  # type: ignore
         mydb = db.session.query(Database).filter_by(id=database_id).one()
@@ -2323,7 +2310,7 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
             )
             return self.json_response("OK")
 
-        if not sql_lab.cancel_query(query, g.user.username if g.user else None):
+        if not sql_lab.cancel_query(query):
             raise SupersetCancelQueryException("Could not cancel query")
 
         query.status = QueryStatus.STOPPED
@@ -2335,12 +2322,18 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
     @event_logger.log_this
     @expose("/validate_sql_json/", methods=["POST", "GET"])
     def validate_sql_json(
-        # pylint: disable=too-many-locals,no-self-use
+        # pylint: disable=too-many-locals
         self,
     ) -> FlaskResponse:
         """Validates that arbitrary sql is acceptable for the given database.
         Returns a list of error/warning annotations as json.
         """
+        logger.warning(
+            "%s.validate_sql_json "
+            "This API endpoint is deprecated and will be removed in version 3.0.0",
+            self.__class__.__name__,
+        )
+
         sql = request.form["sql"]
         database_id = request.form["database_id"]
         schema = request.form.get("schema") or None
@@ -2429,7 +2422,7 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
         sql_json_executor = Superset._create_sql_json_executor(
             execution_context, query_dao
         )
-        execution_context_convertor = ExecutionContextConvertorImpl()
+        execution_context_convertor = ExecutionContextConvertor()
         execution_context_convertor.set_max_row_in_display(
             int(config.get("DISPLAY_MAX_ROW"))  # type: ignore
         )
@@ -2558,10 +2551,8 @@ class Superset(BaseSupersetView):  # pylint: disable=too-many-public-methods
         """
 
         datasource_id, datasource_type = request.args["datasourceKey"].split("__")
-        datasource = ConnectorRegistry.get_datasource(
-            datasource_type,
-            datasource_id,
-            db.session,
+        datasource = DatasourceDAO.get_datasource(
+            db.session, DatasourceType(datasource_type), int(datasource_id)
         )
         # Check if datasource exists
         if not datasource:

@@ -54,6 +54,10 @@ export default styled.div`
       border-top: 0;
     }
 
+    .table > tbody tr td {
+      font-feature-settings: 'tnum' 1;
+    }
+
     .dt-controls {
       padding-bottom: 0.65em;
     }

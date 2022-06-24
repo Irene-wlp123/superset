@@ -28,7 +28,6 @@ from flask_babel import gettext as __, lazy_gettext as _
 from flask_compress import Compress
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from superset.connectors.connector_registry import ConnectorRegistry
 from superset.constants import CHANGE_ME_SECRET_KEY
 from superset.extensions import (
     _event_logger,
@@ -113,19 +112,13 @@ class SupersetAppInitializer:  # pylint: disable=too-many-public-methods
         # the global Flask app
         #
         # pylint: disable=import-outside-toplevel,too-many-locals,too-many-statements
+        from superset.advanced_data_type.api import AdvancedDataTypeRestApi
         from superset.annotation_layers.annotations.api import AnnotationRestApi
         from superset.annotation_layers.api import AnnotationLayerRestApi
         from superset.async_events.api import AsyncEventsRestApi
         from superset.cachekeys.api import CacheRestApi
         from superset.charts.api import ChartRestApi
         from superset.charts.data.api import ChartDataRestApi
-        from superset.connectors.druid.views import (
-            Druid,
-            DruidClusterModelView,
-            DruidColumnInlineView,
-            DruidDatasourceModelView,
-            DruidMetricInlineView,
-        )
         from superset.connectors.sqla.views import (
             RowLevelSecurityFiltersModelView,
             SqlMetricInlineView,
@@ -197,6 +190,7 @@ class SupersetAppInitializer:  # pylint: disable=too-many-public-methods
         appbuilder.add_api(AnnotationRestApi)
         appbuilder.add_api(AnnotationLayerRestApi)
         appbuilder.add_api(AsyncEventsRestApi)
+        appbuilder.add_api(AdvancedDataTypeRestApi)
         appbuilder.add_api(CacheRestApi)
         appbuilder.add_api(ChartRestApi)
         appbuilder.add_api(ChartDataRestApi)
@@ -307,6 +301,7 @@ class SupersetAppInitializer:  # pylint: disable=too-many-public-methods
         appbuilder.add_view_no_menu(TableSchemaView)
         appbuilder.add_view_no_menu(TabStateView)
         appbuilder.add_view_no_menu(TagView)
+        appbuilder.add_view_no_menu(ReportView)
 
         #
         # Add links
@@ -405,66 +400,6 @@ class SupersetAppInitializer:  # pylint: disable=too-many-public-methods
             menu_cond=lambda: bool(self.config["ENABLE_ACCESS_REQUEST"]),
         )
 
-        #
-        # Druid Views
-        #
-        appbuilder.add_separator(
-            "Data", cond=lambda: bool(self.config["DRUID_IS_ACTIVE"])
-        )
-        appbuilder.add_view(
-            DruidDatasourceModelView,
-            "Druid Datasources",
-            label=__("Druid Datasources"),
-            category="Data",
-            category_label=__("Data"),
-            icon="fa-cube",
-            menu_cond=lambda: bool(self.config["DRUID_IS_ACTIVE"]),
-        )
-        appbuilder.add_view(
-            DruidClusterModelView,
-            name="Druid Clusters",
-            label=__("Druid Clusters"),
-            icon="fa-cubes",
-            category="Data",
-            category_label=__("Data"),
-            category_icon="fa-database",
-            menu_cond=lambda: bool(self.config["DRUID_IS_ACTIVE"]),
-        )
-        appbuilder.add_view_no_menu(DruidMetricInlineView)
-        appbuilder.add_view_no_menu(DruidColumnInlineView)
-        appbuilder.add_view_no_menu(Druid)
-
-        appbuilder.add_link(
-            "Scan New Datasources",
-            label=__("Scan New Datasources"),
-            href="/druid/scan_new_datasources/",
-            category="Data",
-            category_label=__("Data"),
-            category_icon="fa-database",
-            icon="fa-refresh",
-            cond=lambda: bool(
-                self.config["DRUID_IS_ACTIVE"]
-                and self.config["DRUID_METADATA_LINKS_ENABLED"]
-            ),
-        )
-        appbuilder.add_view_no_menu(ReportView)
-        appbuilder.add_link(
-            "Refresh Druid Metadata",
-            label=__("Refresh Druid Metadata"),
-            href="/druid/refresh_datasources/",
-            category="Data",
-            category_label=__("Data"),
-            category_icon="fa-database",
-            icon="fa-cog",
-            cond=lambda: bool(
-                self.config["DRUID_IS_ACTIVE"]
-                and self.config["DRUID_METADATA_LINKS_ENABLED"]
-            ),
-        )
-        appbuilder.add_separator(
-            "Data", cond=lambda: bool(self.config["DRUID_IS_ACTIVE"])
-        )
-
     def init_app_in_ctx(self) -> None:
         """
         Runs init logic in the context of the app
@@ -537,7 +472,11 @@ class SupersetAppInitializer:  # pylint: disable=too-many-public-methods
         # Registering sources
         module_datasource_map = self.config["DEFAULT_MODULE_DS_MAP"]
         module_datasource_map.update(self.config["ADDITIONAL_MODULE_DS_MAP"])
-        ConnectorRegistry.register_sources(module_datasource_map)
+
+        # todo(hughhhh): fully remove the datasource config register
+        for module_name, class_names in module_datasource_map.items():
+            class_names = [str(s) for s in class_names]
+            __import__(module_name, fromlist=class_names)
 
     def configure_cache(self) -> None:
         cache_manager.init_app(self.superset_app)

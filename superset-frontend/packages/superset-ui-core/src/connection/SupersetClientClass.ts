@@ -35,9 +35,7 @@ import { DEFAULT_FETCH_RETRY_OPTIONS, DEFAULT_BASE_URL } from './constants';
 
 const defaultUnauthorizedHandler = () => {
   if (!window.location.pathname.startsWith('/login')) {
-    window.location.href = `/login?next=${
-      window.location.pathname + window.location.search
-    }`;
+    window.location.href = `/login?next=${window.location.href}`;
   }
 };
 
@@ -119,6 +117,36 @@ export default class SupersetClientClass {
       return this.csrfPromise as CsrfPromise;
     }
     return this.getCSRFToken();
+  }
+
+  async postForm(url: string, payload: Record<string, any>, target = '_blank') {
+    if (url) {
+      await this.ensureAuth();
+      const hiddenForm = document.createElement('form');
+      hiddenForm.action = url;
+      hiddenForm.method = 'POST';
+      hiddenForm.target = target;
+      const payloadWithToken: Record<string, any> = {
+        ...payload,
+        csrf_token: this.csrfToken!,
+      };
+
+      if (this.guestToken) {
+        payloadWithToken.guest_token = this.guestToken;
+      }
+
+      Object.entries(payloadWithToken).forEach(([key, value]) => {
+        const data = document.createElement('input');
+        data.type = 'hidden';
+        data.name = key;
+        data.value = value;
+        hiddenForm.appendChild(data);
+      });
+
+      document.body.appendChild(hiddenForm);
+      hiddenForm.submit();
+      document.body.removeChild(hiddenForm);
+    }
   }
 
   async reAuthenticate() {

@@ -22,7 +22,7 @@ import PropTypes from 'prop-types';
 import { bindActionCreators } from 'redux';
 import { connect } from 'react-redux';
 import { styled, t, css, useTheme, logging } from '@superset-ui/core';
-import { debounce } from 'lodash';
+import { debounce, pick } from 'lodash';
 import { Resizable } from 're-resizable';
 import { useChangeEffect } from 'src/hooks/useChangeEffect';
 import { usePluginContext } from 'src/components/DynamicPlugins';
@@ -63,8 +63,6 @@ import ConnectedExploreChartHeader from '../ExploreChartHeader';
 
 const propTypes = {
   ...ExploreChartPanel.propTypes,
-  height: PropTypes.string,
-  width: PropTypes.string,
   actions: PropTypes.object.isRequired,
   datasource_type: PropTypes.string.isRequired,
   dashboardId: PropTypes.number,
@@ -86,26 +84,6 @@ const ExploreContainer = styled.div`
   display: flex;
   flex-direction: column;
   height: 100%;
-`;
-
-const ExploreHeaderContainer = styled.div`
-  ${({ theme }) => css`
-    background-color: ${theme.colors.grayscale.light5};
-    height: ${theme.gridUnit * 16}px;
-    padding: 0 ${theme.gridUnit * 4}px;
-
-    .editable-title {
-      overflow: hidden;
-
-      & > input[type='button'],
-      & > span {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        max-width: 100%;
-        white-space: nowrap;
-      }
-    }
-  `}
 `;
 
 const ExplorePanelContainer = styled.div`
@@ -135,6 +113,7 @@ const ExplorePanelContainer = styled.div`
       flex: 1;
       min-width: ${theme.gridUnit * 128}px;
       border-left: 1px solid ${theme.colors.grayscale.light2};
+      padding: 0 ${theme.gridUnit * 4}px;
       .panel {
         margin-bottom: 0;
       }
@@ -172,32 +151,25 @@ const ExplorePanelContainer = styled.div`
   `};
 `;
 
-const getWindowSize = () => ({
-  height: window.innerHeight,
-  width: window.innerWidth,
-});
-
-function useWindowSize({ delayMs = 250 } = {}) {
-  const [size, setSize] = useState(getWindowSize());
-
-  useEffect(() => {
-    const onWindowResize = debounce(() => setSize(getWindowSize()), delayMs);
-    window.addEventListener('resize', onWindowResize);
-    return () => window.removeEventListener('resize', onWindowResize);
-  }, []);
-
-  return size;
-}
-
 const updateHistory = debounce(
-  async (formData, datasetId, isReplace, standalone, force, title, tabId) => {
+  async (
+    formData,
+    datasourceId,
+    datasourceType,
+    isReplace,
+    standalone,
+    force,
+    title,
+    tabId,
+  ) => {
     const payload = { ...formData };
     const chartId = formData.slice_id;
     const additionalParam = {};
     if (chartId) {
       additionalParam[URL_PARAMS.sliceId.name] = chartId;
     } else {
-      additionalParam[URL_PARAMS.datasetId.name] = datasetId;
+      additionalParam[URL_PARAMS.datasourceId.name] = datasourceId;
+      additionalParam[URL_PARAMS.datasourceType.name] = datasourceType;
     }
 
     const urlParams = payload?.url_params || {};
@@ -211,11 +183,24 @@ const updateHistory = debounce(
       let key;
       let stateModifier;
       if (isReplace) {
-        key = await postFormData(datasetId, formData, chartId, tabId);
+        key = await postFormData(
+          datasourceId,
+          datasourceType,
+          formData,
+          chartId,
+          tabId,
+        );
         stateModifier = 'replaceState';
       } else {
         key = getUrlParam(URL_PARAMS.formDataKey);
-        await putFormData(datasetId, key, formData, chartId, tabId);
+        await putFormData(
+          datasourceId,
+          datasourceType,
+          key,
+          formData,
+          chartId,
+          tabId,
+        );
         stateModifier = 'pushState';
       }
       const url = mountExploreUrl(
@@ -246,7 +231,6 @@ function ExploreViewContainer(props) {
   const [lastQueriedControls, setLastQueriedControls] = useState(
     props.controls,
   );
-  const windowSize = useWindowSize();
 
   const [showingModal, setShowingModal] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -254,11 +238,6 @@ function ExploreViewContainer(props) {
   const tabId = useTabId();
 
   const theme = useTheme();
-  const width = `${windowSize.width}px`;
-  const navHeight = props.standalone ? 0 : 120;
-  const height = props.forcedHeight
-    ? `${props.forcedHeight}px`
-    : `${windowSize.height - navHeight}px`;
 
   const defaultSidebarsWidth = {
     controls_width: 320,
@@ -273,11 +252,12 @@ function ExploreViewContainer(props) {
             dashboardId: props.dashboardId,
           }
         : props.form_data;
-      const datasetId = props.datasource.id;
+      const { id: datasourceId, type: datasourceType } = props.datasource;
 
       updateHistory(
         formData,
-        datasetId,
+        datasourceId,
+        datasourceType,
         isReplace,
         props.standalone,
         props.force,
@@ -289,6 +269,7 @@ function ExploreViewContainer(props) {
       props.dashboardId,
       props.form_data,
       props.datasource.id,
+      props.datasource.type,
       props.standalone,
       props.force,
       tabId,
@@ -309,6 +290,7 @@ function ExploreViewContainer(props) {
   }, [props.actions, props.chart.id, props.timeout]);
 
   const onQuery = useCallback(() => {
+    props.actions.setForceQuery(false);
     props.actions.triggerQuery(true, props.chart.id);
     addHistory();
     setLastQueriedControls(props.controls);
@@ -405,18 +387,33 @@ function ExploreViewContainer(props) {
     }
   }, []);
 
-  const reRenderChart = () => {
-    props.actions.updateQueryFormData(
-      getFormDataFromControls(props.controls),
+  const reRenderChart = useCallback(
+    controlsChanged => {
+      const newQueryFormData = controlsChanged
+        ? {
+            ...props.chart.latestQueryFormData,
+            ...getFormDataFromControls(pick(props.controls, controlsChanged)),
+          }
+        : getFormDataFromControls(props.controls);
+      props.actions.updateQueryFormData(newQueryFormData, props.chart.id);
+      props.actions.renderTriggered(new Date().getTime(), props.chart.id);
+      addHistory();
+    },
+    [
+      addHistory,
+      props.actions,
       props.chart.id,
-    );
-    props.actions.renderTriggered(new Date().getTime(), props.chart.id);
-    addHistory();
-  };
+      props.chart.latestQueryFormData,
+      props.controls,
+    ],
+  );
 
   // effect to run when controls change
   useEffect(() => {
-    if (previousControls) {
+    if (
+      previousControls &&
+      props.chart.latestQueryFormData.viz_type === props.controls.viz_type.value
+    ) {
       if (
         props.controls.datasource &&
         (previousControls.datasource == null ||
@@ -436,11 +433,11 @@ function ExploreViewContainer(props) {
       );
 
       // this should also be handled by the actions that are actually changing the controls
-      const hasDisplayControlChanged = changedControlKeys.some(
+      const displayControlsChanged = changedControlKeys.filter(
         key => props.controls[key].renderTrigger,
       );
-      if (hasDisplayControlChanged) {
-        reRenderChart();
+      if (displayControlsChanged.length > 0) {
+        reRenderChart(displayControlsChanged);
       }
     }
   }, [props.controls, props.ownState]);
@@ -515,11 +512,9 @@ function ExploreViewContainer(props) {
   function renderChartContainer() {
     return (
       <ExploreChartPanel
-        width={width}
-        height={height}
         {...props}
         errorMessage={errorMessage}
-        refreshOverlayVisible={chartIsStale}
+        chartIsStale={chartIsStale}
         onQuery={onQuery}
       />
     );
@@ -540,26 +535,23 @@ function ExploreViewContainer(props) {
 
   return (
     <ExploreContainer>
-      <ExploreHeaderContainer>
-        <ConnectedExploreChartHeader
-          ownState={props.ownState}
-          actions={props.actions}
-          canOverwrite={props.can_overwrite}
-          canDownload={props.can_download}
-          dashboardId={props.dashboardId}
-          isStarred={props.isStarred}
-          slice={props.slice}
-          sliceName={props.sliceName}
-          table_name={props.table_name}
-          formData={props.form_data}
-          timeout={props.timeout}
-          chart={props.chart}
-          user={props.user}
-          reports={props.reports}
-          onSaveChart={toggleModal}
-          saveDisabled={errorMessage || props.chart.chartStatus === 'loading'}
-        />
-      </ExploreHeaderContainer>
+      <ConnectedExploreChartHeader
+        actions={props.actions}
+        canOverwrite={props.can_overwrite}
+        canDownload={props.can_download}
+        dashboardId={props.dashboardId}
+        isStarred={props.isStarred}
+        slice={props.slice}
+        sliceName={props.sliceName}
+        table_name={props.table_name}
+        formData={props.form_data}
+        chart={props.chart}
+        ownState={props.ownState}
+        user={props.user}
+        reports={props.reports}
+        onSaveChart={toggleModal}
+        saveDisabled={errorMessage || props.chart.chartStatus === 'loading'}
+      />
       <ExplorePanelContainer id="explore-container">
         <Global
           styles={css`
@@ -630,6 +622,7 @@ function ExploreViewContainer(props) {
             controls={props.controls}
             actions={props.actions}
             shouldForceUpdate={shouldForceUpdate}
+            user={props.user}
           />
         </Resizable>
         {isCollapsed ? (
@@ -711,12 +704,17 @@ function mapStateToProps(state) {
   const chartKey = Object.keys(charts)[0];
   const chart = charts[chartKey];
 
+  let dashboardId = Number(explore.form_data?.dashboardId);
+  if (Number.isNaN(dashboardId)) {
+    dashboardId = undefined;
+  }
+
   return {
     isDatasourceMetaLoading: explore.isDatasourceMetaLoading,
     datasource: explore.datasource,
     datasource_type: explore.datasource.type,
     datasourceId: explore.datasource_id,
-    dashboardId: explore.form_data ? explore.form_data.dashboardId : undefined,
+    dashboardId,
     controls: explore.controls,
     can_overwrite: !!explore.can_overwrite,
     can_add: !!explore.can_add,
