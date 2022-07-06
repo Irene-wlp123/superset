@@ -75,7 +75,7 @@ from superset.security.guest_token import (
     GuestTokenUser,
     GuestUser,
 )
-from superset.utils.core import DatasourceName, RowLevelSecurityFilterType
+from superset.utils.core import DatasourceName, get_user_id, RowLevelSecurityFilterType
 from superset.utils.urls import get_url_host
 
 if TYPE_CHECKING:
@@ -529,7 +529,7 @@ class SupersetSecurityManager(  # pylint: disable=too-many-public-methods
             view_menu_names = (
                 base_query.join(assoc_user_role)
                 .join(self.user_model)
-                .filter(self.user_model.id == g.user.get_id())
+                .filter(self.user_model.id == get_user_id())
                 .filter(self.permission_model.name == permission_name)
             ).all()
             return {s.name for s in view_menu_names}
@@ -1147,25 +1147,16 @@ class SupersetSecurityManager(  # pylint: disable=too-many-public-methods
             ]
         return []
 
-    def get_rls_filters(
-        self,
-        table: "BaseDatasource",
-        username: Optional[str] = None,
-    ) -> List[SqlaQuery]:
+    def get_rls_filters(self, table: "BaseDatasource") -> List[SqlaQuery]:
         """
         Retrieves the appropriate row level security filters for the current user and
         the passed table.
 
-        :param BaseDatasource table: The table to check against.
-        :param Optional[str] username: Optional username if there's no user in the Flask
-        global namespace.
+        :param table: The table to check against
         :returns: A list of filters
         """
-        if hasattr(g, "user"):
-            user = g.user
-        elif username:
-            user = self.find_user(username=username)
-        else:
+
+        if not (hasattr(g, "user") and g.user is not None):
             return []
 
         # pylint: disable=import-outside-toplevel
@@ -1175,7 +1166,7 @@ class SupersetSecurityManager(  # pylint: disable=too-many-public-methods
             RowLevelSecurityFilter,
         )
 
-        user_roles = [role.id for role in self.get_user_roles(user)]
+        user_roles = [role.id for role in self.get_user_roles(g.user)]
         regular_filter_roles = (
             self.get_session()
             .query(RLSFilterRoles.c.rls_filter_id)
@@ -1252,10 +1243,9 @@ class SupersetSecurityManager(  # pylint: disable=too-many-public-methods
 
     @staticmethod
     def raise_for_user_activity_access(user_id: int) -> None:
-        user = g.user if g.user and g.user.get_id() else None
-        if not user or (
+        if not get_user_id() or (
             not current_app.config["ENABLE_BROAD_ACTIVITY_ACCESS"]
-            and user_id != user.id
+            and user_id != get_user_id()
         ):
             raise SupersetSecurityException(
                 SupersetError(

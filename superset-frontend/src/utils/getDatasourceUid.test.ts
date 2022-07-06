@@ -16,23 +16,34 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { combineReducers } from 'redux';
 
-import reports from 'src/reports/reducers/reports';
-import charts from 'src/components/Chart/chartReducer';
-import dataMask from 'src/dataMask/reducer';
-import messageToasts from 'src/components/MessageToasts/reducers';
-import saveModal from './saveModalReducer';
-import explore from './exploreReducer';
+import { DatasourceType } from '@superset-ui/core';
+import { getDatasourceUid } from './getDatasourceUid';
 
-const impressionId = (state = '') => state;
+const TEST_DATASOURCE = {
+  id: 2,
+  type: DatasourceType.Table,
+  columns: [],
+  metrics: [],
+  column_format: {},
+  verbose_map: {},
+  main_dttm_col: '__timestamp',
+  // eg. ['["ds", true]', 'ds [asc]']
+  datasource_name: 'test datasource',
+  description: null,
+};
 
-export default combineReducers({
-  charts,
-  saveModal,
-  dataMask,
-  explore,
-  impressionId,
-  messageToasts,
-  reports,
+const TEST_DATASOURCE_WITH_UID = {
+  ...TEST_DATASOURCE,
+  uid: 'dataset_uid',
+};
+
+test('creates uid from id and type when dataset does not have uid field', () => {
+  expect(getDatasourceUid(TEST_DATASOURCE)).toEqual('2__table');
+});
+
+test('returns uid when dataset has uid field', () => {
+  expect(getDatasourceUid(TEST_DATASOURCE_WITH_UID)).toEqual(
+    TEST_DATASOURCE_WITH_UID.uid,
+  );
 });

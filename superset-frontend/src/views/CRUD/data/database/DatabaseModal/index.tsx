@@ -31,6 +31,7 @@ import React, {
   useReducer,
   Reducer,
 } from 'react';
+import { setItem, LocalStorageKeys } from 'src/utils/localStorageHelpers';
 import { UploadChangeParam, UploadFile } from 'antd/lib/upload/interface';
 import Tabs from 'src/components/Tabs';
 import { AntdSelect, Upload } from 'src/components';
@@ -190,6 +191,11 @@ type DBReducerActionType =
         configuration_method: CONFIGURATION_METHOD;
       };
     };
+
+const StyledBtns = styled.div`
+  margin-bottom: ${({ theme }) => theme.gridUnit * 3}px;
+  margin-left: ${({ theme }) => theme.gridUnit * 3}px;
+`;
 
 function dbReducer(
   state: Partial<DatabaseObject> | null,
@@ -788,6 +794,7 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
             onClick={() => setDatabaseModel(database.name)}
             buttonText={database.name}
             icon={dbImages?.[database.engine]}
+            key={`${database.name}`}
           />
         ))}
     </div>
@@ -973,11 +980,12 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
     ]);
 
     if (!(info.file.originFileObj instanceof File)) return;
-    await importResource(
+    const dbId = await importResource(
       info.file.originFileObj,
       passwords,
       confirmedOverwrite,
     );
+    if (dbId) onDatabaseAdd?.();
   };
 
   const passwordNeededField = () => {
@@ -1106,6 +1114,39 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
     }
     return <></>;
   };
+
+  const fetchAndSetDB = () => {
+    setLoading(true);
+    fetchResource(dbFetched?.id as number).then(r => {
+      setItem(LocalStorageKeys.db, r);
+    });
+  };
+
+  const renderCTABtns = () => (
+    <StyledBtns>
+      <Button
+        // eslint-disable-next-line no-return-assign
+        buttonStyle="default"
+        onClick={() => {
+          fetchAndSetDB();
+          window.location.href = '/tablemodelview/list';
+        }}
+      >
+        {' '}
+        {t('CREATE A DATASET')}{' '}
+      </Button>
+      <Button
+        buttonStyle="default"
+        // eslint-disable-next-line no-return-assign
+        onClick={() => {
+          fetchAndSetDB();
+          window.location.href = `/superset/sqllab/?db=true`;
+        }}
+      >
+        {t('QUERY DATA IN SQL LAB')}{' '}
+      </Button>
+    </StyledBtns>
+  );
 
   const renderFinishState = () => {
     if (!editNewDb) {
@@ -1438,6 +1479,7 @@ const DatabaseModal: FunctionComponent<DatabaseModalProps> = ({
             dbModel={dbModel}
             editNewDb={editNewDb}
           />
+          {renderCTABtns()}
           {renderFinishState()}
         </>
       ) : (
